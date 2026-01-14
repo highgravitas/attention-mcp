@@ -21,7 +21,7 @@ An MCP (Model Context Protocol) server that provides access to [Attention](https
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/attention-mcp.git
+   git clone https://github.com/highgravitas/attention-mcp.git
    cd attention-mcp
    ```
 
