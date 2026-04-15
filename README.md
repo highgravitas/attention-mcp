@@ -8,7 +8,7 @@ An MCP (Model Context Protocol) server that provides access to [Attention](https
 - **Get full transcripts** - Retrieve complete call transcripts with speaker labels
 - **AI summaries** - Access Attention's extracted intelligence (call sentiment, summaries, action items)
 - **List recent calls** - Quick access to conversations from the past N days
-- **Scorecards** - List scorecards, fetch per-criterion rollups, and post written coaching feedback back into Attention
+- **Scorecards** - List scorecards and fetch per-criterion rollups (write-back via `create_scorecard_result` is implemented but temporarily disabled pending an Attention-side fix — see issue #2)
 - **Ask Attention v2** - Run Attention's AI analysis across one or more conversations as a second-opinion signal
 - **GI history** - Pull a rep's generalized-insights history for profile updates
 
@@ -173,7 +173,9 @@ Per-criterion averages for a scorecard across a date range. Feeds weekly manager
 Get last month's scorecard summary for owner@company.com on the AM scorecard
 ```
 
-### `create_scorecard_result`
+### `create_scorecard_result` — **temporarily disabled**
+
+> **Status:** not registered as an MCP tool. Attention's `POST /createScorecardResult` endpoint currently returns `500` with an empty body on every documented payload shape. The `AttentionClient.create_scorecard_result` Python method is kept intact (the code is correct per the public docs); the MCP registration will be restored once the upstream issue is resolved. See [issue #2](https://github.com/highgravitas/attention-mcp/issues/2).
 
 Create a scorecard result (structured coaching feedback) on a conversation. This writes directly into Attention's UI so managers don't have to transcribe feedback manually.
 

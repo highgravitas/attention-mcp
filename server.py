@@ -161,54 +161,10 @@ async def list_tools() -> list[Tool]:
                 "required": ["scorecard_id", "from_date", "to_date"],
             },
         ),
-        Tool(
-            name="create_scorecard_result",
-            description="Create a scorecard result (written coaching feedback) on a conversation. Writes directly into Attention so managers don't need to transcribe feedback manually.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "conversation_id": {
-                        "type": "string",
-                        "description": "Conversation UUID the scorecard is scored against",
-                    },
-                    "scorecard_id": {
-                        "type": "string",
-                        "description": "Scorecard UUID (from list_scorecards)",
-                    },
-                    "items": {
-                        "type": "array",
-                        "description": "Per-criterion results. Each object: {scorecard_item_uuid, description, numeric_result?}",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "scorecard_item_uuid": {
-                                    "type": "string",
-                                    "description": "The criterion UUID (from a scorecard's items)",
-                                },
-                                "description": {
-                                    "type": "string",
-                                    "description": "Written notes for this criterion",
-                                },
-                                "numeric_result": {
-                                    "type": "integer",
-                                    "description": "Optional numeric score for this criterion",
-                                },
-                            },
-                            "required": ["scorecard_item_uuid", "description"],
-                        },
-                    },
-                    "summary": {
-                        "type": "string",
-                        "description": "Overall notes across all criteria",
-                    },
-                    "chat_id": {
-                        "type": "string",
-                        "description": "Alternative target: Attention chat UUID (use instead of conversation_id)",
-                    },
-                },
-                "required": ["scorecard_id", "items", "summary"],
-            },
-        ),
+        # create_scorecard_result: temporarily unregistered — POST /createScorecardResult
+        # returns 500 with empty body from Attention's servers on every documented payload
+        # shape. AttentionClient.create_scorecard_result is kept intact; re-register here
+        # when the upstream issue is resolved. See GitHub issue #2.
         Tool(
             name="ask_attention",
             description="Run Attention's AI analysis (v2) against a prompt over one or more conversations. Returns per-conversation outputs; useful as a second-opinion signal alongside Sales Bible logic.",
@@ -315,14 +271,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=format_scorecards_summary(result))]
 
         elif name == "create_scorecard_result":
-            result = client.create_scorecard_result(
-                scorecard_id=arguments["scorecard_id"],
-                items=arguments["items"],
-                summary=arguments["summary"],
-                conversation_id=arguments.get("conversation_id"),
-                chat_id=arguments.get("chat_id"),
-            )
-            return [TextContent(type="text", text=format_scorecard_result(result, arguments))]
+            # See GitHub issue #2 — POST /createScorecardResult returns 500 with empty
+            # body on every documented payload. Tool is unregistered but this branch is
+            # kept so an MCP client that cached the old tool list gets a clean message.
+            return [TextContent(
+                type="text",
+                text=(
+                    "create_scorecard_result is temporarily disabled. "
+                    "Attention's POST /createScorecardResult endpoint returns 500 with "
+                    "empty body on every documented payload shape. Tracking in the "
+                    "attention-mcp repo (issue #2); will re-enable once Attention fixes it."
+                ),
+            )]
 
         elif name == "ask_attention":
             result = client.ask_attention(
