@@ -112,6 +112,114 @@ async def list_tools() -> list[Tool]:
                 },
             },
         ),
+        Tool(
+            name="list_scorecards",
+            description="List all scorecards configured for the organization (id, name, criteria). Call this first to pick a scorecard_id and criterion ids for create_scorecard_result.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+        Tool(
+            name="get_scorecards_summary",
+            description="Get per-criterion averages for a scorecard over a date range. Feeds weekly manager rollup.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scorecard_id": {
+                        "type": "string",
+                        "description": "Scorecard UUID (from list_scorecards)",
+                    },
+                    "from_date": {
+                        "type": "string",
+                        "description": "Start date in YYYY-MM-DD format",
+                    },
+                    "to_date": {
+                        "type": "string",
+                        "description": "End date in YYYY-MM-DD format",
+                    },
+                    "owner_email": {
+                        "type": "string",
+                        "description": "Optional: filter to a specific AE by email (translated to user UUID internally)",
+                    },
+                    "user_uuids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional: explicit user UUIDs to filter by",
+                    },
+                    "team_uuids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional: team UUIDs to filter by",
+                    },
+                    "scorecard_item_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional: restrict to specific criterion UUIDs",
+                    },
+                },
+                "required": ["scorecard_id", "from_date", "to_date"],
+            },
+        ),
+        # create_scorecard_result: temporarily unregistered — POST /createScorecardResult
+        # returns 500 with empty body from Attention's servers on every documented payload
+        # shape. AttentionClient.create_scorecard_result is kept intact; re-register here
+        # when the upstream issue is resolved. See GitHub issue #2.
+        Tool(
+            name="ask_attention",
+            description="Run Attention's AI analysis (v2) against a prompt over one or more conversations. Returns per-conversation outputs; useful as a second-opinion signal alongside Sales Bible logic.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "The analysis question",
+                    },
+                    "conversation_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Conversation UUIDs to analyze",
+                    },
+                    "deal_id": {
+                        "type": "string",
+                        "description": "Deal identifier (docs mark this required; empty string accepted when not scoped to a deal)",
+                    },
+                    "include_timestamps": {
+                        "type": "boolean",
+                        "description": "If true, returns timestamped transcript segments per conversation (default: false)",
+                        "default": False,
+                    },
+                },
+                "required": ["prompt"],
+            },
+        ),
+        Tool(
+            name="list_gi_history",
+            description="List an org user's generalized-insights (GI) history. Feeds rep-profile updates.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "user_email": {
+                        "type": "string",
+                        "description": "Org user email (translated to UUID internally). Provide this OR user_uuid.",
+                    },
+                    "user_uuid": {
+                        "type": "string",
+                        "description": "User UUID (skip email lookup)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max entries (default: 20)",
+                        "default": 20,
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Pagination offset (default: 0)",
+                        "default": 0,
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -145,6 +253,54 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 size=arguments.get("size", 20),
             )
             return [TextContent(type="text", text=format_search_results(result))]
+
+        elif name == "list_scorecards":
+            result = client.list_scorecards()
+            return [TextContent(type="text", text=format_scorecards(result))]
+
+        elif name == "get_scorecards_summary":
+            result = client.get_scorecards_summary(
+                scorecard_id=arguments["scorecard_id"],
+                from_date=arguments["from_date"],
+                to_date=arguments["to_date"],
+                owner_email=arguments.get("owner_email"),
+                user_uuids=arguments.get("user_uuids"),
+                team_uuids=arguments.get("team_uuids"),
+                scorecard_item_ids=arguments.get("scorecard_item_ids"),
+            )
+            return [TextContent(type="text", text=format_scorecards_summary(result))]
+
+        elif name == "create_scorecard_result":
+            # See GitHub issue #2 — POST /createScorecardResult returns 500 with empty
+            # body on every documented payload. Tool is unregistered but this branch is
+            # kept so an MCP client that cached the old tool list gets a clean message.
+            return [TextContent(
+                type="text",
+                text=(
+                    "create_scorecard_result is temporarily disabled. "
+                    "Attention's POST /createScorecardResult endpoint returns 500 with "
+                    "empty body on every documented payload shape. Tracking in the "
+                    "attention-mcp repo (issue #2); will re-enable once Attention fixes it."
+                ),
+            )]
+
+        elif name == "ask_attention":
+            result = client.ask_attention(
+                prompt=arguments["prompt"],
+                conversation_ids=arguments.get("conversation_ids"),
+                deal_id=arguments.get("deal_id"),
+                include_timestamps=arguments.get("include_timestamps", False),
+            )
+            return [TextContent(type="text", text=format_ask_attention(result))]
+
+        elif name == "list_gi_history":
+            result = client.list_gi_history(
+                user_email=arguments.get("user_email"),
+                user_uuid=arguments.get("user_uuid"),
+                limit=arguments.get("limit", 20),
+                offset=arguments.get("offset", 0),
+            )
+            return [TextContent(type="text", text=format_gi_history(result))]
 
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
@@ -334,6 +490,158 @@ def format_transcript(transcript) -> str:
         return json.dumps(transcript, indent=2)
 
     return str(transcript)
+
+
+def _extract_scorecards(result) -> list[dict]:
+    """Pull scorecards out of the API response, which may be a bare list or wrapped."""
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict):
+        for key in ("data", "scorecards", "results"):
+            val = result.get(key)
+            if isinstance(val, list):
+                return val
+    return []
+
+
+def _scorecard_items(sc: dict) -> list[dict]:
+    """Pull criterion items out of a scorecard, which may be nested under attributes."""
+    attrs = sc.get("attributes", sc) if isinstance(sc.get("attributes"), dict) else sc
+    for key in ("items", "scorecardItems", "criteria"):
+        val = attrs.get(key)
+        if isinstance(val, list):
+            return val
+    return []
+
+
+def format_scorecards(result) -> str:
+    """Format list of scorecards with their criteria."""
+    scorecards = _extract_scorecards(result)
+    if not scorecards:
+        return "No scorecards configured.\n\nRaw response:\n" + json.dumps(result, indent=2)[:2000]
+
+    lines = [f"Found {len(scorecards)} scorecard(s):\n"]
+    for sc in scorecards:
+        attrs = sc.get("attributes", sc) if isinstance(sc.get("attributes"), dict) else sc
+        sc_id = sc.get("uuid") or attrs.get("uuid") or sc.get("id", "unknown")
+        sc_name = attrs.get("name") or attrs.get("title", "Untitled")
+        lines.append(f"## {sc_name}")
+        lines.append(f"  ID: {sc_id}")
+
+        items = _scorecard_items(sc)
+        if items:
+            lines.append("  Criteria:")
+            for item in items:
+                iattrs = item.get("attributes", item) if isinstance(item.get("attributes"), dict) else item
+                item_id = item.get("uuid") or iattrs.get("uuid") or item.get("id", "unknown")
+                item_title = iattrs.get("title") or iattrs.get("name", "Untitled")
+                lines.append(f"    - {item_title} ({item_id})")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def format_scorecards_summary(result: dict) -> str:
+    """Format a scorecards summary (per-criterion averages)."""
+    data = result.get("data", [])
+    if not data:
+        return "No summary data for the given filters."
+
+    lines = [f"Scorecard summary — {len(data)} row(s):\n"]
+    for row in data:
+        user = row.get("userName") or "(unassigned)"
+        team = row.get("teamName") or ""
+        overall = row.get("overallScoreTotals")
+        metrics_count = row.get("metricsCount")
+
+        header = f"### {user}" + (f" — {team}" if team else "")
+        lines.append(header)
+        if overall is not None:
+            lines.append(f"  Overall: {overall} across {metrics_count} call(s)")
+        if row.get("min") is not None or row.get("max") is not None:
+            lines.append(f"  Min / Max: {row.get('min')} / {row.get('max')}")
+
+        for item in row.get("itemAverageTotals", []) or []:
+            title = item.get("title", "Untitled")
+            avg = item.get("average")
+            lines.append(f"  - {title}: {avg}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def format_scorecard_result(result: dict, sent_args: dict) -> str:
+    """Format the response from create_scorecard_result."""
+    success = result.get("success", False)
+    lines = []
+    if success:
+        lines.append("Scorecard result created successfully.")
+    else:
+        lines.append("Scorecard result creation did not report success.")
+    target = sent_args.get("conversation_id") or sent_args.get("chat_id") or "(unknown)"
+    lines.append(f"Target: {target}")
+    lines.append(f"Scorecard: {sent_args.get('scorecard_id')}")
+    lines.append(f"Items scored: {len(sent_args.get('items') or [])}")
+    lines.append("")
+    lines.append("Raw response:")
+    lines.append(json.dumps(result, indent=2))
+    return "\n".join(lines)
+
+
+def format_ask_attention(result) -> str:
+    """Format the response from ask_attention v2."""
+    if not isinstance(result, list):
+        return "Unexpected response shape:\n" + json.dumps(result, indent=2)[:2000]
+    if not result:
+        return "No output returned from Attention."
+
+    lines = [f"Attention returned {len(result)} result(s):\n"]
+    for entry in result:
+        conv_id = entry.get("conversation_id", "(no conversation)")
+        output = entry.get("output", "")
+        error = entry.get("error", "")
+        segments = entry.get("segments") or []
+
+        lines.append(f"### {conv_id}")
+        if error:
+            lines.append(f"  Error: {error}")
+        if output:
+            lines.append(output)
+        for seg in segments:
+            start = seg.get("start_sec")
+            end = seg.get("end_sec")
+            text = seg.get("text", "")
+            lines.append(f"  [{start}s – {end}s] {text}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def format_gi_history(result: dict) -> str:
+    """Format GI history list."""
+    data = result.get("data", [])
+    if not data:
+        return "No GI history entries for this user."
+
+    meta = result.get("meta", {})
+    lines = [f"GI history — {len(data)} entry(ies):\n"]
+    for entry in data:
+        title = entry.get("title", "Untitled")
+        entry_id = entry.get("uuid", "unknown")
+        results = entry.get("results") or []
+        lines.append(f"## {title}")
+        lines.append(f"  ID: {entry_id}")
+        lines.append(f"  Results: {len(results)}")
+        for r in results[:3]:
+            prompt = (r.get("prompt") or "")[:120]
+            synthesis = (r.get("synthesis") or "")[:200]
+            if prompt:
+                lines.append(f"    - Prompt: {prompt}")
+            if synthesis:
+                lines.append(f"      Synthesis: {synthesis}")
+        lines.append("")
+
+    if meta:
+        lines.append(f"Page {meta.get('pageNumber', '?')} of {meta.get('pageCount', '?')} "
+                     f"— {meta.get('totalRecords', '?')} total")
+    return "\n".join(lines)
 
 
 async def main():
