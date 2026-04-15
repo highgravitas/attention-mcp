@@ -8,6 +8,9 @@ An MCP (Model Context Protocol) server that provides access to [Attention](https
 - **Get full transcripts** - Retrieve complete call transcripts with speaker labels
 - **AI summaries** - Access Attention's extracted intelligence (call sentiment, summaries, action items)
 - **List recent calls** - Quick access to conversations from the past N days
+- **Scorecards** - List scorecards, fetch per-criterion rollups, and post written coaching feedback back into Attention
+- **Ask Attention v2** - Run Attention's AI analysis across one or more conversations as a second-opinion signal
+- **GI history** - Pull a rep's generalized-insights history for profile updates
 
 ## Installation
 
@@ -139,6 +142,101 @@ List recent conversations from the past N days.
 Show me calls from the last 2 weeks
 ```
 
+### `list_scorecards`
+
+List all scorecards configured for the org, including each scorecard's criteria. Call this first so you know which `scorecard_id` and criterion UUIDs to pass to `create_scorecard_result` or `get_scorecards_summary`.
+
+**Parameters:** none.
+
+**Example:**
+```
+List all Attention scorecards
+```
+
+### `get_scorecards_summary`
+
+Per-criterion averages for a scorecard across a date range. Feeds weekly manager rollups.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `scorecard_id` | string | Scorecard UUID from `list_scorecards` (required) |
+| `from_date` | string | Start date YYYY-MM-DD (required, converted to ISO 8601 internally) |
+| `to_date` | string | End date YYYY-MM-DD (required) |
+| `owner_email` | string | Optional — filters to a specific AE. Email is resolved to a user UUID via `/organizations/users`. |
+| `user_uuids` | array | Optional — explicit user UUIDs (merged with any resolved `owner_email`) |
+| `team_uuids` | array | Optional — team UUIDs |
+| `scorecard_item_ids` | array | Optional — restrict to specific criterion UUIDs |
+
+**Example:**
+```
+Get last month's scorecard summary for owner@company.com on the AM scorecard
+```
+
+### `create_scorecard_result`
+
+Create a scorecard result (structured coaching feedback) on a conversation. This writes directly into Attention's UI so managers don't have to transcribe feedback manually.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `scorecard_id` | string | Scorecard UUID (required) |
+| `items` | array | Per-criterion results (required). Each object: `{scorecard_item_uuid, description, numeric_result?}` |
+| `summary` | string | Overall notes across all criteria (required) |
+| `conversation_id` | string | Target conversation UUID (one of conversation_id/chat_id required) |
+| `chat_id` | string | Alternative target: Attention chat UUID |
+
+**Notes:**
+- Idempotency is not documented by the Attention API; re-posting the same `scorecard_id + conversation_id` may create duplicate results. De-duplicate on the caller side if needed.
+- Requires an API key with write scope on scorecards.
+
+**Example:**
+```
+Post a scorecard result for conversation X on the AM scorecard with these notes per criterion...
+```
+
+### `ask_attention`
+
+Run Attention's AI analysis (v2) across one or more conversations. Returns an array of per-conversation outputs — useful as a second-opinion signal alongside the Sales Bible.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `prompt` | string | The analysis question (required) |
+| `conversation_ids` | array | Conversation UUIDs to analyze |
+| `deal_id` | string | Deal identifier (empty string accepted when not scoped to a deal) |
+| `include_timestamps` | boolean | If true, returns timestamped transcript segments per conversation |
+
+**Notes:**
+- The API requires at least one of `conversation_ids` or `deal_id`. The client validates this and raises a `ValueError` before making the network call.
+- Per-conversation errors (e.g. `"conversation transcript is empty"`) surface in the `error` field of each result object, not as HTTP errors.
+
+**Example:**
+```
+Use ask_attention to summarize the decision-maker objections across these 3 calls
+```
+
+### `list_gi_history`
+
+List an org user's generalized-insights (GI) history. Feeds rep-profile updates.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `user_email` | string | Org user email (resolved to UUID internally). Provide this OR `user_uuid`. |
+| `user_uuid` | string | User UUID (skip email lookup) |
+| `limit` | integer | Max entries (default: 20) |
+| `offset` | integer | Pagination offset (default: 0) |
+
+**Notes:**
+- The underlying `/gi/history` endpoint does not accept date range filters.
+- If the user has no GI history, the API returns `{"data": null}` rather than an empty array.
+
+**Example:**
+```
+Show GI history for ae@company.com
+```
+
 ## Output Format
 
 ### Conversation Details
@@ -195,11 +293,25 @@ Attention API rate limits apply. See [Attention documentation](https://docs.atte
 
 ```
 attention-mcp/
-├── server.py           # MCP server implementation
-├── attention_client.py # Attention API client wrapper
-├── requirements.txt    # Python dependencies
+├── server.py              # MCP server implementation
+├── attention_client.py    # Attention API client wrapper
+├── scripts/
+│   └── smoke_test.py      # End-to-end smoke test against the real API
+├── requirements.txt       # Python dependencies
 ├── .gitignore
 └── README.md
+```
+
+### Smoke Test
+
+`scripts/smoke_test.py` exercises every client method against the real Attention API:
+
+```bash
+# Dry-run (default) — validates every call except the destructive POST /createScorecardResult
+ATTENTION_API_KEY=... .venv/bin/python scripts/smoke_test.py
+
+# Opt-in actual write of a scorecard result (creates visible data in the Attention UI)
+ATTENTION_API_KEY=... .venv/bin/python scripts/smoke_test.py --write
 ```
 
 ### Running Locally
